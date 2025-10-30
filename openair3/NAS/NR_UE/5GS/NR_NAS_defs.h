@@ -219,7 +219,7 @@ typedef struct {
 /* Plain 5GMM NAS message (5GS) */
 typedef struct {
   fgmm_msg_header_t header;
-  union {
+  union { // it's only one of these
     registration_request_msg registration_request;
     fgs_service_request_msg_t service_request;
     fgmm_identity_response_msg fgs_identity_response;

@@ -769,12 +769,14 @@ void generateRegistrationRequest(as_nas_info_t *initialNasMsg, nr_ue_nas_t *nas,
   
   LOG_I(NAS, "Generate Initial NAS Message: Registration Request\n");
   int size = sizeof(fgmm_msg_header_t); // cleartext size
-  fgmm_nas_msg_security_protected_t sp = {0};
+  fgmm_nas_msg_security_protected_t sp = {0}; // the security protected header is the same as the plain with an extra header on it
 
   /** Check whether the UE has a valid current 5G NAS security context
       and set security protected 5GS NAS message header (see 9.1.1 of 3GPP TS 24.501) */
+
+  // the nas is the nas from get_ue_nas_info() and includes the imsi/uicc
   bool has_security_context = nas->security_container && nas->security_container->integrity_context;
-  if (has_security_context) {
+  if (has_security_context) { // checks for existing NAS Security Context
     sp.header.protocol_discriminator = FGS_MOBILITY_MANAGEMENT_MESSAGE;
     sp.header.security_header_type = INTEGRITY_PROTECTED;
     sp.header.sequence_number = nas->security.nas_count_ul & 0xff;
@@ -784,10 +786,10 @@ void generateRegistrationRequest(as_nas_info_t *initialNasMsg, nr_ue_nas_t *nas,
   // Plain 5GMM message
   sp.plain.header = set_mm_header(FGS_REGISTRATION_REQUEST, PLAIN_5GS_MSG);
   size += sizeof(sp.plain.header);
-  registration_request_msg *rr = &sp.plain.mm_msg.registration_request;
+  registration_request_msg *rr = &sp.plain.mm_msg.registration_request; // get the address where our message will go
 
   // 5GMM Registration Type
-  rr->fgsregistrationtype = set_fgs_registration_type(nas);
+  rr->fgsregistrationtype = set_fgs_registration_type(nas); // set the type to NAS
   size += 1;
   if (rr->fgsregistrationtype == REG_TYPE_RESERVED) {
     // currently only REG_TYPE_RESERVED is supported
@@ -831,12 +833,16 @@ void generateRegistrationRequest(as_nas_info_t *initialNasMsg, nr_ue_nas_t *nas,
     size_nct += sizeof(cap->length) + sizeof(cap->iei) + cap->length;
   }
 
-  if (is_security_mode) {
+  // this final if/else block sends the registration request depending on what security mode is currently set
+  // in order to change the message sent we just have to modify any part of the initialNasMsg
+  // may be able to just directly do this in rrc_UE for simplicity? but also could just mod fields here
+
+  if (is_security_mode) { // either send the full message (security) if there's an existing security mode or just send the body of the security (plain)
     /* Encode both cleartext IEs and non-cleartext IEs Registration Request message in Security Mode Complete.
        The UE includes the full Registration Request in the NAS container IE
        and sends it within the Security Mode Complete message. (24.501 4.4.6, 23.502 4.2.2.2.2) */
     LOG_D(NAS, "Full Initial NAS Message: Registration Request in the NAS container of Security Mode Complete\n");
-    initialNasMsg->nas_data = malloc_or_fail(size_nct * sizeof(*initialNasMsg->nas_data));
+    initialNasMsg->nas_data = malloc_or_fail(size_nct * sizeof(*initialNasMsg->nas_data)); // nas_data is a pointer to uint8_t so this is size * sizeof(char)
     initialNasMsg->length = mm_msg_encode(&full_mm, initialNasMsg->nas_data, size_nct);
   } else if (!has_security_context) {
     /* If no valid 5G NAS security context exists, the UE sends a plain Registration Request including cleartext IEs only. */
