@@ -138,7 +138,7 @@ gNBs:
 
     # AMF parameters:
     amf_ip_address:
-      - ipv4: 192.168.70.132
+      - ipv4: 127.0.0.5
 
 
     NETWORK_INTERFACES:

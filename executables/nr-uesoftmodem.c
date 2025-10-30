@@ -328,10 +328,11 @@ int main(int argc, char **argv)
   //set_softmodem_sighandler();
   CONFIG_SETRTFLAG(CONFIG_NOEXITONHELP);
   memset(tx_max_power,0,sizeof(int)*MAX_NUM_CCs);
+
   // initialize logging
   logInit();
-  // get options and fill parameters from configuration file
 
+  // get options and fill parameters from configuration file
   get_options(uniqCfg); // Command-line options specific for NRUE
   IS_SOFTMODEM_5GUE = true;
   get_common_options(uniqCfg);
@@ -381,12 +382,17 @@ int main(int argc, char **argv)
   }
 
   nr_pdcp_layer_init();
-  nas_init_nrue(NB_UE_INST);
+  nas_init_nrue(NB_UE_INST); // puts module id and imsi into array for NAS stuff. use this instance to get NAS info such as state
 
-  init_NR_UE(NB_UE_INST, get_nrUE_params()->uecap_file, get_nrUE_params()->reconfig_file, get_nrUE_params()->rbconfig_file);
+  init_NR_UE(NB_UE_INST, get_nrUE_params()->uecap_file, get_nrUE_params()->reconfig_file, get_nrUE_params()->rbconfig_file); // init RRC, MAC
+  // populates a NR_UE_RRC_INST_s instance and returns that. contains all relevant rrc info
+  // returns a NR_UE_MAC_INST_t which lives in an array
+  // both of those have a lot of stuff.  
+
 
   // start time manager with some reasonable default for the running mode
   // (may be overwritten in configuration file or command line)
+  // just timing
   void nr_pdcp_ms_tick(void);
   void nr_rlc_ms_tick(void);
   time_manager_tick_function_t tick_functions[] = {
@@ -400,7 +406,9 @@ int main(int argc, char **argv)
                      IS_SOFTMODEM_RFSIM ? TIME_SOURCE_IQ_SAMPLES
                                         : TIME_SOURCE_REALTIME);
 
-  for (int inst = 0; inst < NB_UE_INST; inst++) {
+  
+    // initialize all UE instances including PHY, operating modes, SYNC, DL, UL, RF hardware interface
+    for (int inst = 0; inst < NB_UE_INST; inst++) {
     PHY_VARS_NR_UE *UE[MAX_NUM_CCs];
     for (int CC_id = 0; CC_id < MAX_NUM_CCs; CC_id++) {
       UE[CC_id] = PHY_vars_UE_g[inst][CC_id];
@@ -464,7 +472,7 @@ int main(int argc, char **argv)
     }
   }
 
-  lock_memory_to_ram();
+  lock_memory_to_ram(); // avoids delays
 
   if (IS_SOFTMODEM_DOSCOPE) {
     load_softscope("nr", PHY_vars_UE_g[0][0]);
@@ -480,7 +488,7 @@ int main(int argc, char **argv)
 
   for (int inst = 0; inst < NB_UE_INST; inst++) {
     LOG_I(PHY,"Intializing UE Threads for instance %d ...\n", inst);
-    init_NR_UE_threads(PHY_vars_UE_g[inst][0]);
+    init_NR_UE_threads(PHY_vars_UE_g[inst][0]);       // inits threads for UE_thread and UE stats. the UE_thread is the main thing for while the UE is running
   }
   printf("UE threads created by %ld\n", gettid());
 

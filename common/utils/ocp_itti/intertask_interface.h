@@ -398,7 +398,7 @@ typedef struct message_info_s {
 
 /* Map message id to message information */
 static const message_info_t messages_info[] = {
-#define MESSAGE_DEF(iD, pRIO, sTRUCT, fIELDnAME) { iD, pRIO, sizeof(sTRUCT), #iD },
+#define MESSAGE_DEF(iD, pRIO, sTRUCT, fIELDnAME) { iD, pRIO, sizeof(sTRUCT), #iD }, // why would you case it like this
   FOREACH_MSG(MESSAGE_DEF)
 #include <all_msg.h>
 #undef MESSAGE_DEF

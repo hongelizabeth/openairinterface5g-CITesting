@@ -104,8 +104,7 @@ uint64_t downlink_frequency[MAX_NUM_CCs][4];
 int32_t uplink_frequency_offset[MAX_NUM_CCs][4];
 char *uecap_file;
 
-runmode_t mode = normal_txrx;
-
+runmode_t mode = normal_txrx; // can be   normal_txrx=0, rx_calib_ue=1,  rx_calib_ue_med=2,  rx_calib_ue_byp=3,  debug_prach=4,  no_L2_connect=5,  calib_prach_tx=6,  rx_dump_frame=7,
 #if MAX_NUM_CCs == 1
 double tx_gain[MAX_NUM_CCs][4] = {{20,0,0,0}};
 double rx_gain[MAX_NUM_CCs][4] = {{110,0,0,0}};
@@ -513,6 +512,7 @@ static void initialize_agent(ngran_node_t node_type, e2_agent_args_t oai_args)
 
 void init_eNB_afterRU(void);
 configmodule_interface_t *uniqCfg = NULL;
+
 int main( int argc, char **argv ) {
   int ru_id, CC_id = 0;
   start_background_system();
@@ -551,7 +551,7 @@ int main( int argc, char **argv ) {
   set_taus_seed (0);
 
   cpuf=get_cpu_freq_GHz();
-  itti_init(TASK_MAX, tasks_info);
+  itti_init(TASK_MAX, tasks_info); // intertask interface. 
   // initialize mscgen log after ITTI
   init_opt();
 

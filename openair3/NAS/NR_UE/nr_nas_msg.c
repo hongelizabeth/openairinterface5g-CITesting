@@ -676,7 +676,7 @@ nr_ue_nas_t *get_ue_nas_info(module_id_t module_id)
 {
   AssertFatal(module_id < MAX_NUM_NR_UE_INST, "Invalid module_id %d\n", module_id);
   if (!nr_ue_nas[module_id].uicc) {
-    nr_ue_nas[module_id].uicc = checkUicc(module_id);
+    nr_ue_nas[module_id].uicc = checkUicc(module_id); // gets UICC and if doesn't exist gets the IMSI
     nr_ue_nas[module_id].UE_id = module_id;
   }
   return &nr_ue_nas[module_id];
@@ -765,6 +765,8 @@ static FGSRegistrationType set_fgs_registration_type(nr_ue_nas_t *nas)
  */
 void generateRegistrationRequest(as_nas_info_t *initialNasMsg, nr_ue_nas_t *nas, bool is_security_mode)
 {
+  // this initialNasMsg is empty upon entry
+  
   LOG_I(NAS, "Generate Initial NAS Message: Registration Request\n");
   int size = sizeof(fgmm_msg_header_t); // cleartext size
   fgmm_nas_msg_security_protected_t sp = {0};
@@ -1933,12 +1935,35 @@ void *nas_nrue(void *args_p)
 {
   // Wait for a message or an event
   MessageDef *msg_p;
-  itti_receive_msg(TASK_NAS_NRUE, &msg_p);
+  itti_receive_msg(TASK_NAS_NRUE, &msg_p); // the msg_p has ITTI message header and ITTI message
+
+/*   typedef struct {
+  // 5GS Mobility Management States (5.1.3.2.1 of 3GPP TS 24.501)
+  fgs_mm_state_t fiveGMM_state;
+  // 5GS Mobility Management mode
+  fgs_mm_mode_t fiveGMM_mode;
+  uicc_t *uicc;
+  ue_sa_security_key_t security;
+  stream_security_container_t *security_container;
+  Guti5GSMobileIdentity_t *guti;
+  bool termination_procedure;
+  instance_t UE_id;
+  // RRC Inactive Indication
+  bool is_rrc_inactive;
+  // Timer T3512
+  int t3512;
+  // Timer t3448 in seconds (-1 = disabled)
+  int t3448;
+  // Timer t3446 in seconds (-1 = disabled)
+  int t3446;
+  // NAS Key Set Identifier associated to the security context
+  uint8_t *ksi;
+} nr_ue_nas_t; */
 
   if (msg_p != NULL) {
     nr_ue_nas_t *nas = get_ue_nas_info(msg_p->ittiMsgHeader.destinationInstance);
 
-    switch (ITTI_MSG_ID(msg_p)) {
+    switch (ITTI_MSG_ID(msg_p)) { // this just gets the message ID idk why they felt a macro was necessary
       case INITIALIZE_MESSAGE:
 
         break;

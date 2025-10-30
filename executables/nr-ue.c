@@ -834,8 +834,8 @@ void *UE_thread(void *arg)
       readFrame(UE, &tmp, duration_rx_to_tx, true);
   }
 
-  while (!oai_exit) {
-    if (syncRunning) {
+  while (!oai_exit) { // this is the main loop for processing
+    if (syncRunning) { // synchronization with gNB
       notifiedFIFO_elt_t *res = pollNotifiedFIFO(&nf);
 
       if (res) {
@@ -845,7 +845,7 @@ void *UE_thread(void *arg)
           if (UE->sl_mode == SL_MODE2_SUPPORTED)
             decoded_frame_rx = UE->SL_UE_PHY_PARAMS.sync_params.DFN;
           else {
-            // We must wait the RRC layer decoded the MIB and sent us the frame number
+            // We must wait until the RRC layer has decoded the MIB and sent us the frame number
             notifiedFIFO_elt_t *elt = pullNotifiedFIFO(&mac->input_nf);
             AssertFatal(elt != NULL, "fifo error while waiting for MIB");
             process_msg_rcc_to_mac(NotifiedFifoData(elt), UE->Mod_id);
