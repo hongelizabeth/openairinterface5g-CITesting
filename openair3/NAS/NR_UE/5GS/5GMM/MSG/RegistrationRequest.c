@@ -68,14 +68,20 @@ int decode_registration_request(registration_request_msg *registration_request, 
   return decoded;
 }
 
+/*
+  * Encoding registration request message
+  * 
+*/
 int encode_registration_request(const registration_request_msg *registration_request, uint8_t *buffer, uint32_t len)
 {
-  int encoded = 0;
+  int encoded = 0; // num bytes
   int encode_result = 0;
   bool is_for = true; // Follow-on request pending
 
   *(buffer + encoded) = ((encode_nas_key_set_identifier(&registration_request->naskeysetidentifier, IEI_NULL) & 0x0f) << 4)
                         | (encode_5gs_registration_type(&registration_request->fgsregistrationtype, is_for) & 0x0f);
+
+  // NAS key set identifier and registration type concat into one byte
   encoded++;
 
   if ((encode_result = encode_5gs_mobile_identity(&registration_request->fgsmobileidentity, 0, buffer + encoded, len - encoded))

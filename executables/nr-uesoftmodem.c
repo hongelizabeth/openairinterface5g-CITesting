@@ -120,6 +120,7 @@ int create_tasks_nrue(uint32_t ue_nb) {
   if (ue_nb > 0) {
     LOG_I(NR_RRC,"create TASK_RRC_NRUE \n");
     const ittiTask_parms_t parmsRRC = {NULL, rrc_nrue};
+    // TODO: pass more params
     if (itti_create_task(TASK_RRC_NRUE, rrc_nrue_task, &parmsRRC) < 0) {
       LOG_E(NR_RRC, "Create task for RRC UE failed\n");
       return -1;
