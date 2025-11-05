@@ -304,11 +304,18 @@ typedef struct optmask_s {
     uint64_t v; // allow to export entire bit set, force to 64 bit processor atomic size
   };
 } optmask_t;
+
+typedef enum role {
+  NONE,
+  VICTIM,
+  ATTACKER
+} role_t;
+
 typedef struct {
   optmask_t optmask;
   //THREAD_STRUCT  thread_struct;
   char           *rf_config_file;
-  char *threadPoolConfig;
+  char           *threadPoolConfig;
   int            phy_test;
   int            do_ra;
   uint8_t        sl_mode;
@@ -333,6 +340,10 @@ typedef struct {
   int threequarter_fs;
   int default_pdu_session_id;
   int extra_pdu_session_id;
+
+  // new
+  char* test_file;
+  role_t role;
 } softmodem_params_t;
 
 #define IS_SA_MODE(sM_params) (!(sM_params)->phy_test && !(sM_params)->do_ra && !(sM_params)->nsa)

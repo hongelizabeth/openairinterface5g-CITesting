@@ -25,6 +25,7 @@
 * \date 2009 - 2014
 * \version 0.5
 * @ingroup util
+* details found at https://gitlab.eurecom.fr/oai/openairinterface5g/-/blob/develop/common/utils/LOG/DOC/addconsoletrace.md
 */
 
 #ifndef __LOG_H__

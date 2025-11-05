@@ -69,6 +69,12 @@ typedef enum fgs_mm_mode_e {
   FGS_CONNECTED,
 } fgs_mm_mode_t;
 
+typedef enum identity_type {
+  NONE,
+  SUCI,
+  GUTI,
+} identity_type;
+
 /* Security Key for SA UE */
 typedef struct {
   uint8_t kausf[32];
@@ -84,7 +90,7 @@ typedef struct {
 } ue_sa_security_key_t;
 
 typedef struct {
-  /* 5GS Mobility Management States (5.1.3.2.1 of 3GPP TS 24.501) */
+  /* 5GS Mobility Management test_conf parseFile(const char* test_file)States (5.1.3.2.1 of 3GPP TS 24.501) */
   fgs_mm_state_t fiveGMM_state;
   /* 5GS Mobility Management mode */
   fgs_mm_mode_t fiveGMM_mode;
@@ -106,8 +112,29 @@ typedef struct {
   uint8_t *ksi;
 } nr_ue_nas_t;
 
+
+
+typedef struct test_conf {
+  bool has_security_context;
+  uint8_t sequence_num;
+  bool has_fgs_registration_type; // need this because too many valid values
+  FGSRegistrationType fgs_reg_type; // uint8_t
+  bool has_nas_keyset_id;
+  NasKeySetIdentifier nas_key_set_id;
+  identity_type identity_type;
+  union identity {
+    Suci5GSMobileIdentity_t *suci;
+    Guti5GSMobileIdentity_t *guti;
+  }
+  NrUESecurityCapability *nruesecuritycapability;
+  bool has_mac;
+  uint8_t mac[4];
+} test_conf;
+
 nr_ue_nas_t *get_ue_nas_info(module_id_t module_id);
 void generateRegistrationRequest(as_nas_info_t *initialNasMsg, nr_ue_nas_t *nas, bool is_security_mode);
+void generateTestRegistrationRequest(as_nas_info_t *initialNasMsg, const char* test_file, nr_ue_nas_t *nas);
+void parse_file(const char* test_file)
 void generateServiceRequest(as_nas_info_t *initialNasMsg, nr_ue_nas_t *nas);
 void *nas_nrue_task(void *args_p);
 void *nas_nrue(void *args_p);

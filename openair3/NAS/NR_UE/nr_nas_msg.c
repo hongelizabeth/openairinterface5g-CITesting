@@ -837,6 +837,8 @@ void generateRegistrationRequest(as_nas_info_t *initialNasMsg, nr_ue_nas_t *nas,
   // in order to change the message sent we just have to modify any part of the initialNasMsg
   // may be able to just directly do this in rrc_UE for simplicity? but also could just mod fields here
 
+
+  // this is_security mode appears to always be false
   if (is_security_mode) { // either send the full message (security) if there's an existing security mode or just send the body of the security (plain)
     /* Encode both cleartext IEs and non-cleartext IEs Registration Request message in Security Mode Complete.
        The UE includes the full Registration Request in the NAS container IE
@@ -900,6 +902,359 @@ void generateRegistrationRequest(as_nas_info_t *initialNasMsg, nr_ue_nas_t *nas,
       initialNasMsg->nas_data[mac_start_octet + i] = mac[i];
     }
   }
+}
+
+void generateTestRegistrationRequest(as_nas_info_t *initialNasMsg, const char* test_file, nr_ue_nas_t *nas) {
+  
+  test_conf* test_conf = {0};
+  if (parse_file(test_file, test_conf) == -1) {
+    LOG_E(NAS, "Failed to parse test file %s\n", test_file);
+    initialNasMsg->nas_data = NULL;
+    initialNasMsg->length = 0;
+    return;
+  }
+
+  // TODO parse and close this file
+
+  // TODO generate a struct here with all the input values from file and defaults/indications of omissions
+  
+  int size = sizeof(fgmm_msg_header_t); // cleartext size
+  fgmm_nas_msg_security_protected_t sp = {0}; // the security protected header is the same as the plain with an extra header on it
+
+  
+  bool has_security_context = test_conf->has_security_context;
+  if (has_security_context) { // checks for existing NAS Security Context
+    sp.header.protocol_discriminator = FGS_MOBILITY_MANAGEMENT_MESSAGE;
+    sp.header.security_header_type = INTEGRITY_PROTECTED;
+    sp.header.sequence_number = test_conf->sequence_num & 0xff; // TODO figure out if i need this bitmask
+    size += 7;
+  }
+
+  // Plain 5GMM message
+  sp.plain.header = set_mm_header(FGS_REGISTRATION_REQUEST, PLAIN_5GS_MSG);
+  size += sizeof(sp.plain.header);
+  registration_request_msg *rr = &sp.plain.mm_msg.registration_request; // get the address where our message will go
+
+  // 5GMM Registration Type
+  if (test_conf->has_fgs_registration_type != -1) {
+    rr->fgsregistrationtype = test_conf->fgs_registration_type; // this needs to be parsed carefully using 24.301 9.9.3.36
+  } else {
+    rr->fgsregistrationtype = set_fgs_registration_type(nas); // set the type to NAS
+  }
+  size += 1;
+
+  // need to look at why this is
+  if (rr->fgsregistrationtype == REG_TYPE_RESERVED) {
+    // currently only REG_TYPE_RESERVED is supported
+    LOG_E(NAS, "Initial NAS Message: Registration Request failed\n");  rr->fgsregistrationtype = set_fgs_registration_type(nas); // set the type to NAS
+    return;
+  }
+
+  // NAS Key Set Identifier
+  rr->naskeysetidentifier.tsc = NAS_KEY_SET_IDENTIFIER_NATIVE; // this is just 0. if it is 1 that's mapped security context for KSI_asme
+  
+  if (test_conf->has_nas_keyset_id) {
+    rr->naskeysetidentifier.naskeysetidentifier = test_conf->nas_key_set_id;    
+  } else {
+    rr->naskeysetidentifier.naskeysetidentifier = set_fgs_ksi(nas);
+  }
+  size += 1;
+
+  // 5GMM Mobile Identity
+  if (test_conf->identity_type != NONE) {
+    switch (test_conf->identity_type) {
+      case GUTI:
+        size += fill_guti(&rr->fgsmobileidentity, test_conf->identity->guti);
+        break;
+      case SUCI:
+        size += fill_suci(&rr->fgsmobileidentity, test_conf->identity->suci);
+        break;
+      default:
+        LOG_E(NAS, "ERROR PARSING IDENTITY %i", test_conf->identity_type);
+        return;
+    }
+  } else if(nas->guti){
+    size += fill_guti(&rr->fgsmobileidentity, nas->guti);
+  } else {
+    size += fill_suci(&rr->fgsmobileidentity, nas->uicc);
+  }
+
+  // Security Capability
+  // TODO handle creating struct in file parsing
+  if (test_conf->nruesecuritycapability != NULL) { // deep copy
+    rr->nruesecuritycapability.iei = test_conf->nruesecuritycapability.iei;
+    rr->nruesecuritycapability.length = test_conf->nruesecuritycapability.length;
+    rr->nruesecuritycapability.fg_EA = test_conf->nruesecuritycapability.fg_EA;
+    rr->nruesecuritycapability.fg_IA = test_conf->nruesecuritycapability.fg_IA;
+    rr->nruesecuritycapability.EEA = test_conf->nruesecuritycapability.EEA;
+    rr->nruesecuritycapability.EIA = test_conf->nruesecuritycapability.EIA;
+  } else {
+    rr->presencemask |= REGISTRATION_REQUEST_UE_SECURITY_CAPABILITY_PRESENT;
+    rr->nruesecuritycapability.iei = REGISTRATION_REQUEST_UE_SECURITY_CAPABILITY_IEI;
+    rr->nruesecuritycapability.length = 8;
+    rr->nruesecuritycapability.fg_EA = 0xe0;
+    rr->nruesecuritycapability.fg_IA = 0x60;
+    rr->nruesecuritycapability.EEA = 0;
+    rr->nruesecuritycapability.EIA = 0;
+  }
+  size += 10;
+
+  /* Create a copy of the cleartext 5GMM message, add non-cleartext IEs if necessary */
+  fgmm_nas_message_plain_t full_mm = sp.plain;
+  registration_request_msg *full_rr = &full_mm.mm_msg.registration_request;
+  int size_nct = size; // non-cleartext size
+  bool cleartext_only = true;
+
+  /* 5GMM Capability (non-cleartext IE) - 24.501 8.2.6.3
+    The UE shall include this IE, unless the UE performs a periodic registration updating procedure. */
+
+  // TODO see if i need to edit bc cleartext bad
+  if (full_rr->fgsregistrationtype != PERIODIC_REGISTRATION_UPDATING) {
+    cleartext_only = false; // The UE needs to send non-cleartext IE
+    full_rr->presencemask |= REGISTRATION_REQUEST_5GMM_CAPABILITY_PRESENT;
+    full_rr->fgmmcapability = set_fgmm_capability(nas);
+    FGMMCapability *cap = &full_rr->fgmmcapability;
+    size_nct += sizeof(cap->length) + sizeof(cap->iei) + cap->length;
+  }
+
+  // this final if/else block sends the registration request depending on what security mode is currently set
+  // in order to change the message sent we just have to modify any part of the initialNasMsg
+  // may be able to just directly do this in rrc_UE for simplicity? but also could just mod fields here
+
+
+  // in normal, this is always false, so am going to leave it false
+  if (0) { // either send the full message (security) if there's an existing security mode or just send the body of the security (plain)
+    /* Encode both cleartext IEs and non-cleartext IEs Registration Request message in Security Mode Complete.
+       The UE includes the full Registration Request in the NAS container IE
+       and sends it within the Security Mode Complete message. (24.501 4.4.6, 23.502 4.2.2.2.2) */
+    LOG_D(NAS, "Full Initial NAS Message: Registration Request in the NAS container of Security Mode Complete\n");
+    initialNasMsg->nas_data = malloc_or_fail(size_nct * sizeof(*initialNasMsg->nas_data)); // nas_data is a pointer to uint8_t so this is size * sizeof(char)
+    initialNasMsg->length = mm_msg_encode(&full_mm, initialNasMsg->nas_data, size_nct);
+  } else if (!test_conf->has_security_context) {
+    /* If no valid 5G NAS security context exists, the UE sends a plain Registration Request including cleartext IEs only. */
+    LOG_D(NAS, "Plain Initial NAS Message: Registration Request\n");
+    initialNasMsg->nas_data = malloc_or_fail(size * sizeof(*initialNasMsg->nas_data));
+    initialNasMsg->length = mm_msg_encode(&sp.plain, initialNasMsg->nas_data, size);
+  } else { 
+    /* If the UE has a valid current 5G NAS security context, then it includes the entire 5GMM NAS Registration Request
+       (with both cleartext and non-cleartext IEs) in the NAS message container IE. The value of the NAS message container IE is
+       then ciphered. The UE sends a 5GMM NAS Registration Request message containing cleartext IEs along with the NAS message
+       container IE. */
+    LOG_D(NAS, "Initial NAS Message: Registration Request with ciphered NAS container\n");
+
+    // NAS message container
+    // might need to get rid of this bc i dont have keys or just disable the thing that sets cleartext_only = false when testing
+    if (0) {
+      OctetString *nasmessagecontainercontents = &rr->fgsnasmessagecontainer.nasmessagecontainercontents;
+      nasmessagecontainercontents->value = calloc_or_fail(size_nct, sizeof(*nasmessagecontainercontents->value));
+      nasmessagecontainercontents->length = mm_msg_encode(&full_mm, nasmessagecontainercontents->value, size_nct);
+      size += (nasmessagecontainercontents->length + 2);
+      rr->presencemask |= REGISTRATION_REQUEST_NAS_MESSAGE_CONTAINER_PRESENT;
+      // Workaround to pass integrity in RRC_IDLE
+      uint8_t *kamf = nas->security.kamf;
+      uint8_t *kgnb = nas->security.kgnb;
+      derive_kgnb(kamf, nas->security.nas_count_ul, kgnb);
+      int nas_itti_kgnb_refresh_req(instance_t instance, const uint8_t kgnb[32]);
+      nas_itti_kgnb_refresh_req(nas->UE_id, nas->security.kgnb);
+    }
+    // Allocate buffer (including NAS message container size)
+    initialNasMsg->nas_data = malloc_or_fail(size * sizeof(*initialNasMsg->nas_data));
+
+    // Security protected header encoding
+    int security_header_len = nas_protected_security_header_encode(initialNasMsg->nas_data, &sp.header, size);
+    initialNasMsg->length =
+        security_header_len
+        + mm_msg_encode(&sp.plain, initialNasMsg->nas_data + security_header_len, size - security_header_len);
+    /* integrity protection */
+    uint8_t mac[4];
+    if (!test_conf->has_mac) {
+      nas_stream_cipher_t stream_cipher;
+      AssertFatal(nas->security.nas_count_ul <= 0xffffff, "fatal: NAS COUNT UL too big (todo: fix that)\n");
+      stream_cipher.context = nas->security_container->integrity_context;
+      stream_cipher.count = nas->security.nas_count_ul++;
+      stream_cipher.bearer = 1;
+      stream_cipher.direction = 0;
+      // Security protected header is cleartext except the SN field
+      uint8_t cleartext_len = sizeof(sp.header) - 1;
+      // Message to be integrity protected
+      stream_cipher.message = initialNasMsg->nas_data + cleartext_len;
+      // Length of integrity protected message in bits
+      stream_cipher.blength = (initialNasMsg->length - cleartext_len) << 3;
+      stream_compute_integrity(nas->security_container->integrity_algorithm, &stream_cipher, mac);
+    } else {
+      mac = test_conf->mac;
+    }
+    uint8_t mac_len = sizeof(sp.header.message_authentication_code);
+    uint8_t mac_start_octet = 2;
+    LOG_D(NAS, "Integrity protected initial NAS message: mac = %x %x %x %x \n", mac[0], mac[1], mac[2], mac[3]);
+    for (int i = 0; i < mac_len; i++) {
+      initialNasMsg->nas_data[mac_start_octet + i] = mac[i];
+    }
+  }
+}
+
+void parse_file(const char* test_file, test_conf *conf) {
+
+  // typedef struct test_conf {
+  // bool has_security_context;
+  // bool is_security_mode;
+  // bool has_fgs_registration_type; // need this because too many valid values
+  // FGSRegistrationType fgs_reg_type; // uint8_t
+  // uint8_t nas_key_set_id;
+  // identity_type identity_type;
+  // union identity {
+  //   uicc_t *suci;
+  //   Guti5GSMobileIdentity_t *guti;
+  // }
+  // NrUESecurityCapability *nruesecuritycapability;
+  // } test_conf;
+
+  char line[256];
+  FILE *f = fopen(test_file, "r");
+  
+  if (!f) {
+    LOG_E(NAS, "Could not open test configuration file %s\n", test_file);
+    return;
+  }
+
+  // prepopulate with default values
+
+  test_conf->has_security_context = false;
+  test_conf->is_security_mode = false;
+  test_conf->has_fgs_registration_type = false;
+  test_conf->has_nas_keyset_id = false;
+  test_conf->identity_type = NONE;
+  test_conf->nruesecuritycapability = NULL;
+
+  bool in_section = false;
+  while (fgets(line, sizeof(line), f)) {
+    // Remove newline
+    char *nl = strchr(line, '\n'); 
+    if (nl) *nl = '\0';
+
+    // Skip empty lines and comments
+    if (line[0] == '\0' || line[0] == '#' || line[0] == ';')
+      continue;
+
+    // Check for section header
+    if (line[0] == '[') {
+      char *end = strchr(line, ']');
+      if (!end) continue;
+      *end = '\0';
+      if (strcmp(line+1, "registration_request") == 0) {
+        in_section = true;
+      } else {
+        in_section = false; 
+      }
+      continue;
+    }
+
+    if (!in_section)
+      continue;
+
+    // Parse key=value pairs
+    char *sep = strchr(line, '=');
+    if (!sep) continue;
+    *sep = '\0';
+    
+    // Trim whitespace
+    char *key = line;
+    char *value = sep + 1;
+    while (*key && isspace(*key)) key++;
+    while (*value && isspace(*value)) value++;
+    char *end = key + strlen(key) - 1;
+    while (end > key && isspace(*end)) *end-- = '\0';
+    end = value + strlen(value) - 1; 
+    while (end > value && isspace(*end)) *end-- = '\0';
+
+    // Process fields specific to registration request message
+    if (strcmp(key, "security context") == 0) {
+      if (strcmp(value, "integrity") == 0)
+        test_conf->has_security_context = true;
+    }
+    else if (strcmp(key, "mac") == 0) {
+      // MAC field present
+      test_conf->has_mac = true;
+      if (strcmp(value, "zero") == 0) { // potentially handle other values
+        memset(test_conf->mac, 0, 4);
+      }
+      // Add handling for specific MAC values if needed
+    }
+    else if (strcmp(key, "registration_type") == 0) {
+      test_conf->has_fgs_registration_type = true;
+      if (strcmp(value, "initial") == 0)
+        test_conf->fgs_reg_type = INITIAL_REGISTRATION; 
+      else if (strcmp(value, "mobility") == 0)
+        test_conf->fgs_reg_type = MOBILITY_REGISTRATION_UPDATING;
+      else if (strcmp(value, "periodic") == 0)
+        test_conf->fgs_reg_type = PERIODIC_REGISTRATION_UPDATING;
+      else if (strcmp(value, "emergency") == 0)
+        test_conf->fgs_reg_type = EMERGENCY_REGISTRATION;
+      else if (strcmp(value, "reserved") == 0)
+        test_conf->fgs_reg_type = REG_TYPE_RESERVED;
+      else {
+        LOG_E(NAS, "Invalid registration_type value: %s\n", value);
+        test_conf->has_fgs_registration_type = false; // reset to false on error
+      }
+    }
+    else if (strcmp(key, "guti") == 0) {
+      test_conf->identity_type = GUTI;
+      test_conf->identity.guti.typeofidentity = FGS_MOBILE_IDENTITY_5G_GUTI;
+      test_conf->identity.guti.mccdigit1 = value[0] - '0';
+      test_conf->identity.guti.mccdigit2 = value[1] - '0';
+      test_conf->identity.guti.mccdigit3 = value[2] - '0';
+      test_conf->identity.guti.mncdigit1 = value[3] - '0';
+      test_conf->identity.guti.mncdigit2 = value[4] - '0';
+      test_conf->identity.guti.mncdigit3 = value[5] - '0';
+      
+    } else if (strcmp(key, "suci") == 0) {
+      test_conf->identity_type = SUCI;
+      test_conf->identity.suci.typeofidentity = FGS_MOBILE_IDENTITY_SUCI;
+      test_conf->identity.suci.mccdigit1 = value[0] - '0';
+      test_conf->identity.suci.mccdigit2 = value[1] - '0';
+      test_conf->identity.suci.mccdigit3 = value[2] - '0';
+      test_conf->identity.suci.mncdigit1 = value[3] - '0';
+      test_conf->identity.suci.mncdigit2 = value[4] - '0';
+      test_conf->identity.suci.mncdigit3 = value[5] - '0';
+      memcpy(test_conf->identity.suci.schemeoutput, value + 6, strlen(value + 6));
+    }
+    else if (strcmp(key, "nas_key_set_id") == 0) { // takes in string of 4 binary
+      test_conf->has_nas_keyset_id = true;
+      if (strlen(value) > 4) {
+        LOG_E(NAS, "Invalid nas_key_set_id length: %s\n", value);
+        test_conf->has_nas_keyset_id = false;
+        continue;
+      }
+      for (int i = 0; i < 4; i++) {
+        if (value[i] != '0' && value[i] != '1') {
+          LOG_E(NAS, "Invalid nas_key_set_id value: %s\n", value);
+          test_conf->has_nas_keyset_id = false;
+          break;
+        } else {
+          test_conf->nas_key_set_id <<= 1;
+          if (value[i] == '1')
+            test_conf->nas_key_set_id |= 0b1;
+        }
+      }
+    }
+    else if (strcmp(key, "security_capabilities") == 0) {
+      test_conf->nruesecuritycapability = calloc(1, sizeof(NrUESecurityCapability));
+      // Example: parse comma-separated list of algorithms 
+      char *alg = strtok(value, ",");
+      while (alg) {
+        if (strcmp(alg, "ea0") == 0)
+          test_conf->nruesecuritycapability->fg_EA |= 0x80;
+        else if (strcmp(alg, "ia0") == 0)
+          test_conf->nruesecuritycapability->fg_IA |= 0x80;
+        alg = strtok(NULL, ",");
+      }
+    }
+  }
+
+  fclose(f);
+  return 0; // Return success
+}
+
 }
 
 void generateServiceRequest(as_nas_info_t *initialNasMsg, nr_ue_nas_t *nas)

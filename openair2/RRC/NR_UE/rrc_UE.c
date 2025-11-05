@@ -59,6 +59,7 @@
 #include "nr_pdcp/nr_pdcp_oai_api.h"
 #include "openair3/SECU/secu_defs.h"
 #include "openair3/SECU/key_nas_deriver.h"
+#include "openair3/NAS/COMMON/API/NETWORK/logger_help.c"
 
 #include "common/utils/LOG/log.h"
 #include "common/utils/LOG/vcd_signal_dumper.h"
@@ -1767,7 +1768,17 @@ static void rrc_ue_generate_RRCSetupComplete(const NR_UE_RRC_INST_t *rrc, const 
   uint8_t buffer[100];
   as_nas_info_t initialNasMsg;
 
-  if (IS_SA_MODE(get_softmodem_params())) {
+  softmodem_params_t *sparams = get_softmodem_params();
+
+  if (sparams->role == ATTACKER || sparams->role == VICTIM) {
+    if (sparams->role == ATTACKER) {
+      LOG_I(NR_RRC, "Generating Attacker Registration Request using %s test file./\n", sparams->test_file);
+    } else {
+      LOG_I(NR_RRC, "Generating Victim Registration Request using %s test file./\n", sparams->test_file);
+    }
+    nr_ue_nas_t *nas = get_ue_nas_info(rrc->ue_id);
+    generateTestRegistrationRequest(&initialNasMsg, sparams->test_file, nas);
+  } else if (IS_SA_MODE(sparams)) {
     nr_ue_nas_t *nas = get_ue_nas_info(rrc->ue_id);
     // Send Initial NAS message (Registration Request) before Security Mode control procedure
     generateRegistrationRequest(&initialNasMsg, nas, false);
@@ -1775,11 +1786,14 @@ static void rrc_ue_generate_RRCSetupComplete(const NR_UE_RRC_INST_t *rrc, const 
       LOG_E(NR_RRC, "Failed to complete RRCSetup. NAS InitialUEMessage message not found.\n");
       return;
     }
+    log_nr_ue_nas(nas);
   } else {
     initialNasMsg.length = sizeof(nr_nas_attach_req_imsi_dummy_NSA_case);
     initialNasMsg.nas_data = malloc_or_fail(initialNasMsg.length);
     memcpy(initialNasMsg.nas_data, nr_nas_attach_req_imsi_dummy_NSA_case, initialNasMsg.length);
   }
+
+
 
   // Encode RRCSetupComplete
   int size = do_RRCSetupComplete(buffer,
