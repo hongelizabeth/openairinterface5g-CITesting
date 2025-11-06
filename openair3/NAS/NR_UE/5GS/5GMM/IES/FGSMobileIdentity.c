@@ -185,7 +185,7 @@ static int decode_guti_5gs_mobile_identity(Guti5GSMobileIdentity_t *guti, const 
     return (TLV_ENCODE_VALUE_DOESNT_MATCH);
   }
 
-  guti->oddeven = (*(buffer + decoded) >> 3) & 0x1;
+  guti->oddeven = (*(buffer + decoded) >> 3) & 0x1; // this should ALWAYS be 0 for 5G-GUTI
 
   /*
    * For the 5G-GUTI, bits 4 of octet 3 are coded as "0"

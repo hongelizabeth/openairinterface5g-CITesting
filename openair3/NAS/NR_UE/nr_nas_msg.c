@@ -904,7 +904,7 @@ void generateRegistrationRequest(as_nas_info_t *initialNasMsg, nr_ue_nas_t *nas,
   }
 }
 
-void generateTestRegistrationRequest(as_nas_info_t *initialNasMsg, const char* test_file, nr_ue_nas_t *nas) {
+void generateTestRegistrationRequest(as_nas_info_t* initialNasMsg, const char* test_file, nr_ue_nas_t* nas) {
   
   test_conf* test_conf = {0};
   if (parse_file(test_file, test_conf) == -1) {
@@ -1093,7 +1093,7 @@ void generateTestRegistrationRequest(as_nas_info_t *initialNasMsg, const char* t
   }
 }
 
-void parse_file(const char* test_file, test_conf *conf) {
+void parse_file(const char* test_file, test_conf* conf) {
 
   // typedef struct test_conf {
   // bool has_security_context;
@@ -1196,29 +1196,9 @@ void parse_file(const char* test_file, test_conf *conf) {
         LOG_E(NAS, "Invalid registration_type value: %s\n", value);
         test_conf->has_fgs_registration_type = false; // reset to false on error
       }
-    }
-    else if (strcmp(key, "guti") == 0) {
-      test_conf->identity_type = GUTI;
-      test_conf->identity.guti.typeofidentity = FGS_MOBILE_IDENTITY_5G_GUTI;
-      test_conf->identity.guti.mccdigit1 = value[0] - '0';
-      test_conf->identity.guti.mccdigit2 = value[1] - '0';
-      test_conf->identity.guti.mccdigit3 = value[2] - '0';
-      test_conf->identity.guti.mncdigit1 = value[3] - '0';
-      test_conf->identity.guti.mncdigit2 = value[4] - '0';
-      test_conf->identity.guti.mncdigit3 = value[5] - '0';
-      
-    } else if (strcmp(key, "suci") == 0) {
-      test_conf->identity_type = SUCI;
-      test_conf->identity.suci.typeofidentity = FGS_MOBILE_IDENTITY_SUCI;
-      test_conf->identity.suci.mccdigit1 = value[0] - '0';
-      test_conf->identity.suci.mccdigit2 = value[1] - '0';
-      test_conf->identity.suci.mccdigit3 = value[2] - '0';
-      test_conf->identity.suci.mncdigit1 = value[3] - '0';
-      test_conf->identity.suci.mncdigit2 = value[4] - '0';
-      test_conf->identity.suci.mncdigit3 = value[5] - '0';
-      memcpy(test_conf->identity.suci.schemeoutput, value + 6, strlen(value + 6));
-    }
-    else if (strcmp(key, "nas_key_set_id") == 0) { // takes in string of 4 binary
+    } else if (strcmp(key, "guti") == 0) {
+      parse_guti_from_file(value, test_conf);
+    } else if (strcmp(key, "nas_key_set_id") == 0) { // takes in string of 4 binary
       test_conf->has_nas_keyset_id = true;
       if (strlen(value) > 4) {
         LOG_E(NAS, "Invalid nas_key_set_id length: %s\n", value);
@@ -1229,25 +1209,22 @@ void parse_file(const char* test_file, test_conf *conf) {
         if (value[i] != '0' && value[i] != '1') {
           LOG_E(NAS, "Invalid nas_key_set_id value: %s\n", value);
           test_conf->has_nas_keyset_id = false;
-          break;
+          continue;
         } else {
           test_conf->nas_key_set_id <<= 1;
-          if (value[i] == '1')
+          if (value[i] == '1') {
             test_conf->nas_key_set_id |= 0b1;
+          }
         }
       }
-    }
-    else if (strcmp(key, "security_capabilities") == 0) {
-      test_conf->nruesecuritycapability = calloc(1, sizeof(NrUESecurityCapability));
-      // Example: parse comma-separated list of algorithms 
-      char *alg = strtok(value, ",");
-      while (alg) {
-        if (strcmp(alg, "ea0") == 0)
-          test_conf->nruesecuritycapability->fg_EA |= 0x80;
-        else if (strcmp(alg, "ia0") == 0)
-          test_conf->nruesecuritycapability->fg_IA |= 0x80;
-        alg = strtok(NULL, ",");
-      }
+    } else if (strcmp(key, "fgea") == 0) {
+      parse_security(value, test_conf->nruesecuritycapability->fg_EA);
+    } else if (strcmp(key, "fgia") == 0) {
+
+    } else if (strcmp(key, "eea") == 0) {
+
+    } else if (strcmp(key, "eia") == 0) {
+
     }
   }
 
@@ -1255,6 +1232,90 @@ void parse_file(const char* test_file, test_conf *conf) {
   return 0; // Return success
 }
 
+void parse_guti_from_file(const char* guti_config, test_conf *conf) {
+  char line[256];
+  FILE *f = fopen(guti_config, "r");
+  Guti5GSMobileIdentity_t *guti = malloc_or_fail(sizeof(Guti5GSMobileIdentity_t));
+  // they do not free the guti. so maybe neither will i
+  conf->identity->guti = guti;
+  if (!f) {
+    LOG_E(NAS, "Could not open guti configuration file %s\n", guti_config);
+    return;
+  }
+  conf->identity_type = GUTI;
+  guti->typeofidentity = FGS_MOBILE_IDENTITY_5G_GUTI;
+  guti->oddeven = 0;
+
+  while (fgets(line, sizeof(line), f)) {
+    char *nl = strchr(line, '\n');
+    if (nl) *nl = '\0';
+
+    /* skip comments/empty */
+    char *p = line;
+    while (*p && isspace((unsigned char)*p)) p++;
+    if (*p == '\0' || *p == '#' || *p == ';') continue;
+
+    char *eq = strchr(p, '=');
+    if (!eq) continue;
+    *eq = '\0';
+    char *key = p;
+    char *val = eq + 1;
+
+    /* trim */
+    while (*key && isspace((unsigned char)*key)) key++;
+    char *kend = key + strlen(key) - 1;
+    while (kend > key && isspace((unsigned char)*kend)) *kend-- = '\0';
+
+    while (*val && isspace((unsigned char)*val)) val++;
+    char *vend = val + strlen(val) - 1;
+    while (vend > val && isspace((unsigned char)*vend)) *vend-- = '\0';
+
+    if (strcasecmp(key, "mcc") == 0) {
+      if (strlen(val) >= 3) {
+        g->mccdigit1 = val[0] - '0';
+        g->mccdigit2 = val[1] - '0';
+        g->mccdigit3 = val[2] - '0';
+      } else {
+        LOG_W(NAS, "Invalid MCC '%s' in %s\n", val, guti_config);
+      }
+    } else if (strcasecmp(key, "mnc") == 0) {
+      size_t len = strlen(val);
+      if (len == 2) {
+        g->mncdigit1 = val[0] - '0';
+        g->mncdigit2 = val[1] - '0';
+        g->mncdigit3 = 0xF; /* per spec for 2-digit MNC */
+      } else if (len == 3) {
+        g->mncdigit1 = val[0] - '0';
+        g->mncdigit2 = val[1] - '0';
+        g->mncdigit3 = val[2] - '0';
+      } else {
+        LOG_W(NAS, "Invalid MNC '%s' in %s\n", val, guti_config);
+      }
+    } else if (strcasecmp(key, "amf_region") == 0) {
+      long v = strtol(val, NULL, 0);
+      if (v < 0 || v > 0xFF) LOG_W(NAS, "amf_region out of range: %s\n", val);
+      g->amfregionid = (uint8_t)(v & 0xFF);
+    } else if (strcasecmp(key, "amf_set") == 0) {
+      long v = strtol(val, NULL, 0);
+      if (v < 0 || v > 0x3FF) LOG_W(NAS, "amf_set out of range (0..1023): %s\n", val);
+      g->amfsetid = (uint16_t)(v & 0x03FF); /* 10 bits */
+    } else if (strcasecmp(key, "amf_pointer") == 0) {
+      long v = strtol(val, NULL, 0);
+      if (v < 0 || v > 0x3F) LOG_W(NAS, "amf_pointer out of range (0..63): %s\n", val);
+      g->amfpointer = (uint16_t)(v & 0x003F); /* 6 bits */
+    } else if (strcasecmp(key, "tmsi") == 0) {
+      /* accept decimal or hex (0x...) */
+      unsigned long v = strtoul(val, NULL, 0);
+      g->tmsi = (uint32_t)(v & 0xFFFFFFFF);
+    } else {
+      LOG_D(NAS, "Unknown GUTI key '%s' ignored\n", key);
+    }
+  }
+  fclose(f);
+}
+
+void parse_security(char* value, uint8_t field) {
+  
 }
 
 void generateServiceRequest(as_nas_info_t *initialNasMsg, nr_ue_nas_t *nas)

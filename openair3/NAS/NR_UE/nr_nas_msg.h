@@ -126,7 +126,7 @@ typedef struct test_conf {
     Suci5GSMobileIdentity_t *suci;
     Guti5GSMobileIdentity_t *guti;
   }
-  NrUESecurityCapability *nruesecuritycapability;
+  NrUESecurityCapability* nruesecuritycapability;
   bool has_mac;
   uint8_t mac[4];
 } test_conf;
